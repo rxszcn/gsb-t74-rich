@@ -634,9 +634,6 @@ class Table(JupyterMixin):
         padding = self.padding
         any_padding = any(padding)
 
-        first_column = column_index == 0
-        last_column = column_index == len(self.columns) - 1
-
         _padding_cache: Dict[Tuple[bool, bool], Tuple[int, int, int, int]] = {}
 
         def get_padding(first_row: bool, last_row: bool) -> Tuple[int, int, int, int]:
@@ -645,17 +642,12 @@ class Table(JupyterMixin):
                 return cached
             top, right, bottom, left = padding
 
-            if collapse_padding:
-                if not first_column:
-                    left = max(0, left - right)
-                if not last_row:
-                    bottom = max(0, top - bottom)
+            left, right = self._get_column_padding(column_index)
+
+            if collapse_padding and not last_row:
+                bottom = max(0, top - bottom)
 
             if not pad_edge:
-                if first_column:
-                    left = 0
-                if last_column:
-                    right = 0
                 if first_row:
                     top = 0
                 if last_row:
@@ -697,20 +689,33 @@ class Table(JupyterMixin):
                     getattr(renderable, "vertical", None) or column.vertical,
                 )
 
-    def _get_padding_width(self, column_index: int) -> int:
-        """Get extra width from padding."""
-        _, pad_right, _, pad_left = self.padding
+    def _get_column_padding(self, column_index: int) -> Tuple[int, int]:
+        """Get the (left, right) padding applied to a column.
 
-        if self.collapse_padding:
-            pad_left = 0
-            pad_right = abs(pad_left - pad_right)
+        With padding collapsed, the gap between two columns is the larger of
+        the adjacent paddings, so a column only contributes the residual of
+        its own left padding over the previous column's right padding.
+        Without collapsing, both sides contribute in full. Edge padding is
+        dropped from the outer sides of the first and last columns when
+        ``pad_edge`` is disabled.
+        """
+        _, pad_right, _, pad_left = self.padding
+        last_column = column_index == len(self.columns) - 1
+
+        if self.collapse_padding and column_index > 0:
+            pad_left = max(0, pad_left - pad_right)
 
         if not self.pad_edge:
             if column_index == 0:
                 pad_left = 0
-            if column_index == len(self.columns) - 1:
+            if last_column:
                 pad_right = 0
 
+        return pad_left, pad_right
+
+    def _get_padding_width(self, column_index: int) -> int:
+        """Get extra width from padding."""
+        pad_left, pad_right = self._get_column_padding(column_index)
         return pad_left + pad_right
 
     def _measure_column(
